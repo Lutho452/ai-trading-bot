@@ -1,78 +1,47 @@
-# AI Trading Bot App
+from __future__ import annotations
 
-A lightweight AI-powered trading bot demo built with Python and FastAPI. The app generates synthetic market data, computes technical indicators, scores BUY/SELL/HOLD signals, and runs a simple backtest.
+from typing import Optional
 
-## Features
+from fastapi import FastAPI, HTTPException, Query
 
-- Synthetic OHLCV data generation
-- Technical indicators: SMA, RSI, MACD, volatility
-- AI-inspired signal engine
-- Backtesting engine with equity curve
-- REST API with FastAPI
-- Optional Streamlit dashboard
+from app.services.trading_service import analyze_market, backtest_symbol
 
-## Stack
+app = FastAPI(title="AI Trading Bot Advanced", version="2.0.0")
 
-- Python 3.11+
-- FastAPI
-- Pandas / NumPy
-- scikit-learn
-- Streamlit
 
-## Quick start
+@app.get("/")
+def root() -> dict:
+    return {"message": "AI Trading Bot API is live"}
 
-1. Create and activate a virtual environment:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate
-   ```
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok", "service": "ai-trading-bot"}
 
-3. Run the API:
-   ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-   ```
 
-4. Open the docs:
-   - http://localhost:8000/docs
+@app.get("/api/market/analyze")
+async def market_analyze(
+    symbol: str = Query(..., description="Ticker symbol such as BTCUSDT or AAPL"),
+    market: str = Query(default="crypto", description="crypto|stock"),
+    interval: str = Query(default="1h", description="Candlestick interval"),
+    limit: int = Query(default=250, ge=50, le=1000),
+    account_balance: float = Query(default=10000.0, ge=100.0),
+):
+    try:
+        return await analyze_market(symbol=symbol, market=market, interval=interval, limit=limit, account_balance=account_balance)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-5. Optional dashboard:
-   ```bash
-   streamlit run dashboard.py
-   ```
 
-## API examples
-
-```bash
-curl http://localhost:8000/health
-curl "http://localhost:8000/api/market/snapshot?symbol=BTCUSD&periods=200"
-curl -X POST http://localhost:8000/api/backtest \
-  -H "Content-Type: application/json" \
-  -d '{"symbol":"BTCUSD","periods":200,"initial_capital":10000,"allocation":0.5}'
-```
-
-## Project layout
-
-```text
-app/
-  __init__.py
-  config.py
-  data.py
-  models.py
-  strategies.py
-  backtest.py
-  main.py
-
-dashboard.py
-requirements.txt
-README.md
-.gitignore
-```
-
-## Notes
-
-This is a starter project for learning and prototyping. It does not include brokerage integration or live execution.
+@app.get("/api/backtest")
+async def backtest(
+    symbol: str = Query(...),
+    market: str = Query(default="crypto"),
+    interval: str = Query(default="1h"),
+    limit: int = Query(default=250, ge=50, le=1000),
+    initial_capital: float = Query(default=10000.0, ge=100.0),
+):
+    try:
+        return await backtest_symbol(symbol=symbol, market=market, interval=interval, limit=limit, initial_capital=initial_capital)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

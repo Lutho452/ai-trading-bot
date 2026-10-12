@@ -1,7 +1,4 @@
-fastapi==0.115.0
-uvicorn==0.30.1
-pandas==2.2.2
-numpy==2.1.1
-scikit-learn==1.5.2
-streamlit==1.37.1
-pydantic==2.8.2
+DATABASE_URL=sqlite:///./trading.db
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+ALPHA_VANTAGE_API_KEY=

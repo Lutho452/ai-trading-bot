@@ -1,40 +1,37 @@
 from __future__ import annotations
 
-from typing import List
+from datetime import datetime
 
-from pydantic import BaseModel, Field
+from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
-
-class MarketRequest(BaseModel):
-    symbol: str = "BTCUSD"
-    periods: int = Field(default=200, ge=50, le=5000)
+from app.database import Base
 
 
-class BacktestRequest(MarketRequest):
-    initial_capital: float = Field(default=10000.0, gt=0)
-    allocation: float = Field(default=0.5, gt=0, le=1)
+class MarketSnapshot(Base):
+    __tablename__ = "market_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    market: Mapped[str] = mapped_column(String(32), default="crypto")
+    interval: Mapped[str] = mapped_column(String(16), default="1h")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    open_price: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(32), default="binance")
 
 
-class SignalResponse(BaseModel):
-    symbol: str
-    price: float
-    signal: str
-    confidence: float
-    score: float
-    reasons: List[str]
+class TradeRecord(Base):
+    __tablename__ = "trade_records"
 
-
-class BacktestSummary(BaseModel):
-    symbol: str
-    initial_capital: float
-    final_value: float
-    total_return_pct: float
-    max_drawdown_pct: float
-    trades: int
-    signal_history: List[str]
-    equity_curve: List[float]
-
-
-class HealthResponse(BaseModel):
-    status: str = "ok"
-    app: str = "ai-trading-bot"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(16))
+    quantity: Mapped[float] = mapped_column(Float)
+    price: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(32), default="open")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    strategy: Mapped[str] = mapped_column(String(64), default="ml_signal")

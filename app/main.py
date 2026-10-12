@@ -1,62 +1,96 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, Query
+from typing import Any
 
-from app.backtest import BacktestEngine
-from app.data import generate_market_data
-from app.models import BacktestRequest, BacktestSummary, HealthResponse, MarketRequest, SignalResponse
-from app.strategies import analyze_signal
+import httpx
+import pandas as pd
 
-app = FastAPI(title="AI Trading Bot", version="1.0.0")
+from app.config import settings
 
 
-@app.get("/", tags=["meta"])
-def home() -> dict:
-    return {"message": "AI Trading Bot API is running"}
+class MarketDataProvider:
+    async def get_ohlcv(self, symbol: str, interval: str = "1h", limit: int = 200) -> pd.DataFrame:
+        raise NotImplementedError
 
 
-@app.get("/health", response_model=HealthResponse, tags=["meta"])
-def health() -> HealthResponse:
-    return HealthResponse(status="ok", app="ai-trading-bot")
+class BinanceProvider(MarketDataProvider):
+    BASE_URL = "https://api.binance.com/api/v3"
+
+    async def get_ohlcv(self, symbol: str, interval: str = "1h", limit: int = 200) -> pd.DataFrame:
+        market_symbol = symbol.upper().replace("-", "")
+        if not market_symbol.endswith(("USDT", "USD")):
+            market_symbol = f"{market_symbol}USDT"
+
+        params = {"symbol": market_symbol, "interval": interval, "limit": limit}
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(f"{self.BASE_URL}/klines", params=params)
+            response.raise_for_status()
+
+        payload = response.json()
+        columns = [
+            "open_time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "close_time",
+            "quote_asset_volume",
+            "trade_count",
+            "taker_buy_base_asset_volume",
+            "taker_buy_quote_asset_volume",
+            "ignore",
+        ]
+        frame = pd.DataFrame(payload, columns=columns)
+        if frame.empty:
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+
+        frame["timestamp"] = pd.to_datetime(frame["open_time"], unit="ms")
+        frame = frame[["timestamp", "open", "high", "low", "close", "volume"]].astype({
+            "open": float,
+            "high": float,
+            "low": float,
+            "close": float,
+            "volume": float,
+        })
+        return frame.reset_index(drop=True)
 
 
-@app.get("/api/market/snapshot", tags=["market"])
-def market_snapshot(
-    symbol: str = Query(default="BTCUSD", description="Ticker symbol"),
-    periods: int = Query(default=200, ge=50, le=5000),
-) -> dict:
-    data = generate_market_data(symbol=symbol, periods=periods)
-    latest = data.iloc[-1].to_dict()
-    return {
-        "symbol": symbol,
-        "close": float(latest["close"]),
-        "sma_10": float(latest["sma_10"]),
-        "sma_30": float(latest["sma_30"]),
-        "rsi_14": float(latest["rsi_14"]),
-        "macd": float(latest["macd"]),
-        "volatility": float(latest["volatility"]),
-    }
+class AlphaVantageProvider(MarketDataProvider):
+    BASE_URL = "https://www.alphavantage.co/query"
 
+    async def get_ohlcv(self, symbol: str, interval: str = "60min", limit: int = 200) -> pd.DataFrame:
+        api_key = settings.ALPHA_VANTAGE_API_KEY
+        if not api_key:
+            raise ValueError("ALPHA_VANTAGE_API_KEY is not set")
 
-@app.post("/api/strategy/signal", response_model=SignalResponse, tags=["strategy"])
-def strategy_signal(request: MarketRequest) -> SignalResponse:
-    data = generate_market_data(symbol=request.symbol, periods=request.periods)
-    signal = analyze_signal(data)
-    return SignalResponse(**signal)
+        params = {
+            "function": "TIME_SERIES_INTRADAY",
+            "symbol": symbol.upper(),
+            "interval": interval,
+            "outputsize": "compact",
+            "apikey": api_key,
+        }
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(self.BASE_URL, params=params)
+            response.raise_for_status()
 
+        payload = response.json()
+        series_key = next((key for key in payload if "Time Series" in key), None)
+        if not series_key:
+            raise ValueError(f"Invalid Alpha Vantage response: {payload}")
 
-@app.post("/api/backtest", response_model=BacktestSummary, tags=["backtest"])
-def run_backtest(request: BacktestRequest) -> BacktestSummary:
-    data = generate_market_data(symbol=request.symbol, periods=request.periods)
-    engine = BacktestEngine(data, initial_capital=request.initial_capital, allocation=request.allocation)
-    result = engine.run()
-    return BacktestSummary(
-        symbol=result["symbol"],
-        initial_capital=result["initial_capital"],
-        final_value=result["final_value"],
-        total_return_pct=result["total_return_pct"],
-        max_drawdown_pct=result["max_drawdown_pct"],
-        trades=result["trades"],
-        signal_history=result["signal_history"],
-        equity_curve=result["equity_curve"],
-    )
+        raw = payload[series_key]
+        frame = pd.DataFrame.from_dict(raw, orient="index")
+        frame = frame.rename(columns={
+            "1. open": "open",
+            "2. high": "high",
+            "3. low": "low",
+            "4. close": "close",
+            "5. volume": "volume",
+        })
+        frame = frame[["open", "high", "low", "close", "volume"]].astype(float)
+        frame["timestamp"] = pd.to_datetime(frame.index)
+        frame = frame.reset_index(drop=True)
+        return frame.tail(limit).reset_index(drop=True)
+

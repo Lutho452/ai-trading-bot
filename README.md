@@ -1,6 +1,6 @@
 # AI Trading Bot App
 
-A lightweight AI-powered trading bot demo built with Python and FastAPI. The app generates synthetic market data, computes technical indicators, scores BUY/SELL/HOLD signals, and runs a simple backtest.
+A lightweight AI-powered trading bot live built with Python and FastAPI. The app generates synthetic market data, computes technical indicators, scores BUY/SELL/HOLD signals, and runs a simple backtest.
 
 ## Features
 

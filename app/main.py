@@ -1,47 +1,48 @@
 from __future__ import annotations
 
-from typing import Optional
+from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query
+from sqlalchemy import DateTime, Float, Integer, String
+from sqlalchemy.orm import Mapped, mapped_column
 
-from app.services.trading_service import analyze_market, backtest_symbol
-
-app = FastAPI(title="AI Trading Bot Advanced", version="2.0.0")
-
-
-@app.get("/")
-def root() -> dict:
-    return {"message": "AI Trading Bot API is live"}
+from app.database import Base
 
 
-@app.get("/health")
-def health() -> dict:
-    return {"status": "ok", "service": "ai-trading-bot"}
+class MarketSnapshot(Base):
+    __tablename__ = "market_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    market: Mapped[str] = mapped_column(String(32), default="crypto")
+    interval: Mapped[str] = mapped_column(String(16), default="1h")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    open_price: Mapped[float] = mapped_column(Float)
+    high: Mapped[float] = mapped_column(Float)
+    low: Mapped[float] = mapped_column(Float)
+    close: Mapped[float] = mapped_column(Float)
+    volume: Mapped[float] = mapped_column(Float)
+    source: Mapped[str] = mapped_column(String(32), default="binance")
 
 
-@app.get("/api/market/analyze")
-async def market_analyze(
-    symbol: str = Query(..., description="Ticker symbol such as BTCUSDT or AAPL"),
-    market: str = Query(default="crypto", description="crypto|stock"),
-    interval: str = Query(default="1h", description="Candlestick interval"),
-    limit: int = Query(default=250, ge=50, le=1000),
-    account_balance: float = Query(default=10000.0, ge=100.0),
-):
-    try:
-        return await analyze_market(symbol=symbol, market=market, interval=interval, limit=limit, account_balance=account_balance)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+class TradeRecord(Base):
+    __tablename__ = "trade_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    side: Mapped[str] = mapped_column(String(16))
+    quantity: Mapped[float] = mapped_column(Float)
+    price: Mapped[float] = mapped_column(Float)
+    status: Mapped[str] = mapped_column(String(32), default="open")
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    strategy: Mapped[str] = mapped_column(String(64), default="ml_signal")
 
 
-@app.get("/api/backtest")
-async def run_backtest(
-    symbol: str = Query(...),
-    market: str = Query(default="crypto"),
-    interval: str = Query(default="1h"),
-    limit: int = Query(default=250, ge=50, le=1000),
-    initial_capital: float = Query(default=10000.0, ge=100.0),
-):
-    try:
-        return await backtest_symbol(symbol=symbol, market=market, interval=interval, limit=limit, initial_capital=initial_capital)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+class AlertLog(Base):
+    __tablename__ = "alert_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    symbol: Mapped[str] = mapped_column(String(32), index=True)
+    level: Mapped[str] = mapped_column(String(16), default="INFO")
+    message: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(16), default="queued")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

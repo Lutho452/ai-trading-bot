@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Dict, List, Optional
 
-import httpx
 import pandas as pd
 
 from app.config import settings
@@ -92,3 +91,8 @@ class AlphaVantageProvider(MarketDataProvider):
         frame = frame[["open", "high", "low", "close", "volume"]].astype(float)
         frame["timestamp"] = pd.to_datetime(frame.index)
         return frame.tail(limit).reset_index(drop=True)
+
+
+async def fetch_market_data(symbol: str, market: str = "crypto", interval: str = "1h", limit: int = 200) -> pd.DataFrame:
+    provider: MarketDataProvider = AlphaVantageProvider() if market.lower() == "stock" else BinanceProvider()
+    return await provider.get_ohlcv(symbol=symbol, interval=interval, limit=limit)

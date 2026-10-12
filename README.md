@@ -1,82 +1,41 @@
-# AI Trading Bot (Advanced)
+import streamlit as st
 
-A production-style AI trading bot starter for crypto and stock markets. It includes:
+from app.services.market_data import fetch_market_data
+from app.services.strategy_engine import StrategyEngine
 
-- real market APIs (Binance and Alpha Vantage)
-- technical indicator feature engineering
-- ML-based signal generation using logistic regression
-- risk management and position sizing
-- backtesting engine
-- FastAPI endpoints for analysis and paper trading workflows
+st.set_page_config(page_title="AI Trading Bot", layout="wide")
 
-## Features
+st.title("AI Trading Bot Dashboard")
 
-- Crypto market data via Binance REST API
-- Stock market data via Alpha Vantage
-- SMA, EMA, RSI, MACD, volatility, and Bollinger band features
-- AI signal scoring with ML confidence
-- Position sizing and stop-loss estimates
-- Endpoints for analysis and backtesting
+symbol = st.text_input("Symbol", value="BTCUSDT")
+market = st.selectbox("Market", ["crypto", "stock"])
+interval = st.selectbox("Interval", ["1m", "5m", "15m", "1h", "4h", "1d"])
+limit = st.slider("Candles", min_value=50, max_value=500, value=200)
 
-## Prerequisites
+if st.button("Analyze market"):
+    try:
+        data = st.session_state.get("market_data")
+        if data is None:
+            data = __import__("asyncio").run(fetch_market_data(symbol=symbol, market=market, interval=interval, limit=limit))
+            st.session_state["market_data"] = data
 
-- Python 3.11+
-- A Binance API key is optional for public market data
-- An Alpha Vantage API key if you want stock data
+        engine = StrategyEngine()
+        engine.train(data)
+        signal = engine.generate_signal(data)
 
-## Install
+        st.subheader(f"Signal for {symbol}")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Signal", signal["signal"])
+        col2.metric("Confidence", f"{signal['confidence'] * 100:.1f}%")
+        col3.metric("Price", f"${signal['price']:.2f}")
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
+        st.write("Reasons:")
+        for reason in signal["reasons"]:
+            st.write(f"- {reason}")
 
-## Environment variables
+        st.line_chart(data.set_index("timestamp")["close"])
+    except Exception as exc:
+        st.error(f"Unable to fetch data: {exc}")
 
-Create a `.env` file:
-
-```env
-DATABASE_URL=sqlite:///./trading.db
-BINANCE_API_KEY=
-BINANCE_API_SECRET=
-ALPHA_VANTAGE_API_KEY=your_key_here
-```
-
-## Run the API
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-## Example requests
-
-```bash
-curl "http://localhost:8000/api/market/analyze?symbol=BTCUSDT&market=crypto&interval=1h&limit=250&account_balance=10000"
-curl "http://localhost:8000/api/backtest?symbol=BTCUSDT&market=crypto&interval=1h&limit=250&initial_capital=10000"
-```
-
-## Project structure
-
-```text
-app/
-  __init__.py
-  config.py
-  database.py
-  models.py
-  main.py
-  services/
-    feature_engineering.py
-    market_data.py
-    market_data_provider.py
-    risk_management.py
-    strategy_engine.py
-    trading_service.py
-requirements.txt
-.env.example
-README.md
-```
-
-## Notes
-
-This is a strong base for a real trading platform, but should still be treated as a research and paper-trading prototype. For production usage, add authentication, persistence, broker integrations, logs, and monitoring.
+st.sidebar.header("Controls")
+st.sidebar.caption("AI trading dashboard for research and paper trading")

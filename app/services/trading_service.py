@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 import pandas as pd
 
-from app.services.market_data import fetch_market_data
+from app.services.market_data_provider import fetch_market_data
 from app.services.risk_management import RiskManager
 from app.services.strategy_engine import StrategyEngine
 

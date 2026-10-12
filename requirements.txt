@@ -1,10 +1,94 @@
-fastapi==0.115.2
-uvicorn==0.30.6
-pydantic==2.9.2
-pydantic-settings==2.4.0
-sqlalchemy==2.0.35
-httpx==0.27.2
-pandas==2.2.3
-numpy==2.1.4
-scikit-learn==1.5.2
-python-dotenv==1.0.1
+# AI Trading Bot (Advanced)
+
+A production-style AI trading bot starter for crypto and stock markets with real market data, risk controls, ML-based signal generation, and a local dashboard.
+
+## Features
+
+- Binance and Alpha Vantage integration for live market data
+- Technical features: SMA, EMA, RSI, MACD, volatility, Bollinger
+- Logistic-regression ML signal engine
+- Risk management and position sizing
+- Backtesting workflow
+- FastAPI endpoints
+- Local Streamlit dashboard
+- Alert webhook support
+- Portfolio service prototype
+
+## Tech stack
+
+- Python 3.11+
+- FastAPI
+- Streamlit
+- SQLAlchemy
+- Pandas / NumPy
+- scikit-learn
+- httpx
+
+## Installation
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+## Environment variables
+
+Create a `.env` file with:
+
+```env
+DATABASE_URL=sqlite:///./trading.db
+BINANCE_API_KEY=
+BINANCE_API_SECRET=
+ALPHA_VANTAGE_API_KEY=your_key_here
+```
+
+## Run the API
+
+```bash
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+## Run the dashboard
+
+```bash
+streamlit run dashboard.py
+```
+
+## Example API calls
+
+```bash
+curl "http://localhost:8000/api/market/analyze?symbol=BTCUSDT&market=crypto&interval=1h&limit=250&account_balance=10000"
+curl "http://localhost:8000/api/backtest?symbol=BTCUSDT&market=crypto&interval=1h&limit=250&initial_capital=10000"
+curl "http://localhost:8000/api/portfolio"
+curl -X POST "http://localhost:8000/api/alerts/test?message=Test+alert"
+```
+
+## Project structure
+
+```text
+app/
+  __init__.py
+  config.py
+  database.py
+  main.py
+  models.py
+  services/
+    alerts.py
+    feature_engineering.py
+    market_data.py
+    market_data_provider.py
+    portfolio_service.py
+    risk_management.py
+    strategy_engine.py
+    trading_service.py
+
+dashboard.py
+requirements.txt
+.env.example
+README.md
+```
+
+## Notes
+
+This is a strong research and paper-trading foundation. For real brokerage trading, add authentication, order execution, audits, persistent storage, monitoring, and risk safeguards.

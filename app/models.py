@@ -1,37 +1,37 @@
 from __future__ import annotations
 
-from datetime import datetime
-
-from sqlalchemy import DateTime, Float, Integer, String
-from sqlalchemy.orm import Mapped, mapped_column
-
-from app.database import Base
+from typing import Dict, List
 
 
-class MarketSnapshot(Base):
-    __tablename__ = "market_snapshots"
+class PortfolioService:
+    def __init__(self, initial_cash: float = 10000.0):
+        self.initial_cash = initial_cash
+        self.cash = initial_cash
+        self.positions: Dict[str, float] = {}
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    market: Mapped[str] = mapped_column(String(32), default="crypto")
-    interval: Mapped[str] = mapped_column(String(16), default="1h")
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    open_price: Mapped[float] = mapped_column(Float)
-    high: Mapped[float] = mapped_column(Float)
-    low: Mapped[float] = mapped_column(Float)
-    close: Mapped[float] = mapped_column(Float)
-    volume: Mapped[float] = mapped_column(Float)
-    source: Mapped[str] = mapped_column(String(32), default="binance")
+    def buy(self, symbol: str, quantity: float, price: float) -> Dict[str, float]:
+        cost = quantity * price
+        if cost > self.cash:
+            raise ValueError("Not enough cash to buy")
+        self.cash -= cost
+        self.positions[symbol] = self.positions.get(symbol, 0.0) + quantity
+        return {"symbol": symbol, "quantity": quantity, "cost": cost}
 
+    def sell(self, symbol: str, quantity: float, price: float) -> Dict[str, float]:
+        if self.positions.get(symbol, 0.0) < quantity:
+            raise ValueError("Not enough position to sell")
+        self.positions[symbol] = self.positions.get(symbol, 0.0) - quantity
+        if self.positions[symbol] == 0:
+            del self.positions[symbol]
+        proceeds = quantity * price
+        self.cash += proceeds
+        return {"symbol": symbol, "quantity": quantity, "proceeds": proceeds}
 
-class TradeRecord(Base):
-    __tablename__ = "trade_records"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[str] = mapped_column(String(16))
-    quantity: Mapped[float] = mapped_column(Float)
-    price: Mapped[float] = mapped_column(Float)
-    status: Mapped[str] = mapped_column(String(32), default="open")
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
-    strategy: Mapped[str] = mapped_column(String(64), default="ml_signal")
+    def summary(self) -> Dict[str, object]:
+        total_value = self.cash + sum(qty * 0.0 for qty in self.positions.values())
+        return {
+            "cash": self.cash,
+            "positions": self.positions,
+            "total_value": total_value,
+            "initial_cash": self.initial_cash,
+        }

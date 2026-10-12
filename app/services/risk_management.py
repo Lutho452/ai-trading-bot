@@ -1,122 +1,35 @@
 from __future__ import annotations
 
-from typing import Any, Dict
-
-import numpy as np
-import pandas as pd
-from sklearn.linear_model import LogisticRegression
-
-from app.services.feature_engineering import add_technical_features
+from typing import Dict, Any
 
 
-class StrategyEngine:
-    def __init__(self, lookahead: int = 3):
-        self.lookahead = lookahead
-        self.model = LogisticRegression(max_iter=2000, solver="lbfgs")
+class RiskManager:
+    def __init__(self, max_position_pct: float = 0.2, max_daily_loss_pct: float = 0.03):
+        self.max_position_pct = max_position_pct
+        self.max_daily_loss_pct = max_daily_loss_pct
 
-    def prepare_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        enriched = add_technical_features(data)
+    def get_position_size(self, account_balance: float, signal: str, price: float, confidence: float) -> Dict[str, Any]:
+        if price <= 0:
+            raise ValueError("Price must be positive")
 
-        if len(enriched) < 5:
-            return enriched
+        max_budget = account_balance * self.max_position_pct
+        risk_budget = account_balance * self.max_daily_loss_pct
+        confidence_factor = max(min(confidence, 1.0), 0.0)
 
-        enriched["future_return"] = enriched["close"].shift(-self.lookahead).pct_change().fillna(0)
-        enriched["target"] = (enriched["future_return"] > 0).astype(int)
-        return enriched
-
-    def train(self, data: pd.DataFrame) -> Dict[str, Any]:
-        enriched = self.prepare_features(data)
-        feature_columns = [
-            "returns",
-            "sma_10",
-            "sma_30",
-            "macd",
-            "rsi_14",
-            "volatility",
-            "bollinger_position",
-        ]
-        model_data = enriched[feature_columns + ["target"]].dropna()
-        if len(model_data) < 10:
-            return {"status": "insufficient_data"}
-
-        X = model_data[feature_columns]
-        y = model_data["target"]
-        self.model.fit(X, y)
-        return {"status": "trained", "feature_columns": feature_columns}
-
-    def generate_signal(self, data: pd.DataFrame, account_balance: float = 10000.0) -> Dict[str, Any]:
-        enriched = self.prepare_features(data)
-        feature_columns = [
-            "returns",
-            "sma_10",
-            "sma_30",
-            "macd",
-            "rsi_14",
-            "volatility",
-            "bollinger_position",
-        ]
-
-        if enriched.empty:
-            return {"signal": "HOLD", "confidence": 0.0, "score": 0.0, "reasons": ["No data"]}
-
-        latest = enriched.iloc[-1]
-        sample = enriched[feature_columns].dropna().tail(1)
-
-        if len(sample) == 0:
-            return {"signal": "HOLD", "confidence": 0.0, "score": 0.0, "reasons": ["Insufficient feature data"]}
-
-        try:
-            prob = self.model.predict_proba(sample)[0]
-            positive_prob = float(prob[1])
-            negative_prob = float(prob[0])
-        except Exception:
-            positive_prob = 0.5
-            negative_prob = 0.5
-
-        heuristic_score = 0.0
-        reasons = []
-
-        if latest["sma_10"] > latest["sma_30"]:
-            heuristic_score += 1.2
-            reasons.append("Trend is upward")
+        if signal == "BUY":
+            target_value = max_budget * (0.4 + confidence_factor * 0.6)
+        elif signal == "SELL":
+            target_value = max_budget * (0.3 + confidence_factor * 0.5)
         else:
-            heuristic_score -= 1.2
-            reasons.append("Trend is downward")
+            target_value = 0.0
 
-        if latest["rsi_14"] < 30:
-            heuristic_score += 1.0
-            reasons.append("Oversold RSI")
-        elif latest["rsi_14"] > 70:
-            heuristic_score -= 1.0
-            reasons.append("Overbought RSI")
+        position_size = max(0.0, min(target_value / price, 1_000_000_000.0))
+        stop_loss_price = price * (0.97 if signal == "BUY" else 1.03)
 
-        if latest["macd"] > 0:
-            heuristic_score += 0.6
-            reasons.append("Positive MACD")
-        elif latest["macd"] < 0:
-            heuristic_score -= 0.6
-            reasons.append("Negative MACD")
-
-        if latest["volatility"] > 0.02:
-            heuristic_score -= 0.5
-            reasons.append("High volatility")
-
-        model_score = positive_prob - negative_prob
-        overall_score = heuristic_score * 0.6 + model_score * 1.2
-
-        if overall_score > 0.35:
-            signal = "BUY"
-        elif overall_score < -0.35:
-            signal = "SELL"
-        else:
-            signal = "HOLD"
-
-        confidence = min(max(abs(overall_score) / 2.0, 0.1), 0.95)
         return {
             "signal": signal,
-            "confidence": round(float(confidence), 4),
-            "score": round(float(overall_score), 4),
-            "price": float(latest["close"]),
-            "reasons": reasons,
-            "account_balance": float(account_balance),
+            "position_size": round(float(position_size), 6),
+            "notional_value": round(float(position_size * price), 2),
+            "risk_budget": round(float(risk_budget), 2),
+            "stop_loss_price": round(float(stop_loss_price), 4),
         }

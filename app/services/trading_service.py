@@ -1,35 +1,80 @@
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any, Dict
+
+import pandas as pd
+
+from app.services.market_data import fetch_market_data
+from app.services.risk_management import RiskManager
+from app.services.strategy_engine import StrategyEngine
 
 
-class RiskManager:
-    def __init__(self, max_position_pct: float = 0.2, max_daily_loss_pct: float = 0.03):
-        self.max_position_pct = max_position_pct
-        self.max_daily_loss_pct = max_daily_loss_pct
+async def analyze_market(
+    symbol: str,
+    market: str = "crypto",
+    interval: str = "1h",
+    limit: int = 250,
+    account_balance: float = 10000.0,
+) -> Dict[str, Any]:
+    data = await fetch_market_data(symbol=symbol, market=market, interval=interval, limit=limit)
+    engine = StrategyEngine()
+    engine.train(data)
+    signal = engine.generate_signal(data, account_balance=account_balance)
+    risk = RiskManager().get_position_size(
+        account_balance=account_balance,
+        signal=signal["signal"],
+        price=signal["price"],
+        confidence=signal["confidence"],
+    )
+    return {
+        "symbol": symbol,
+        "market": market,
+        "interval": interval,
+        "latest_signal": signal,
+        "risk": risk,
+        "data_points": len(data),
+    }
 
-    def get_position_size(self, account_balance: float, signal: str, price: float, confidence: float) -> Dict[str, Any]:
-        if price <= 0:
-            raise ValueError("Price must be positive")
 
-        max_budget = account_balance * self.max_position_pct
-        risk_budget = account_balance * self.max_daily_loss_pct
-        confidence_factor = max(min(confidence, 1.0), 0.0)
+async def backtest_symbol(
+    symbol: str,
+    market: str = "crypto",
+    interval: str = "1h",
+    limit: int = 250,
+    initial_capital: float = 10000.0,
+) -> Dict[str, Any]:
+    data = await fetch_market_data(symbol=symbol, market=market, interval=interval, limit=limit)
+    if data.empty:
+        return {"symbol": symbol, "signal": "HOLD", "equity_curve": [initial_capital], "total_return": 0.0}
 
-        if signal == "BUY":
-            target_value = max_budget * (0.4 + confidence_factor * 0.6)
-        elif signal == "SELL":
-            target_value = max_budget * (0.3 + confidence_factor * 0.5)
-        else:
-            target_value = 0.0
+    engine = StrategyEngine()
+    engine.train(data)
 
-        position_size = max(0.0, min(target_value / price, 1_000_000_000.0))
-        stop_loss_price = price * (0.97 if signal == "BUY" else 1.03)
+    cash = initial_capital
+    position = 0.0
+    equity_curve = [initial_capital]
 
-        return {
-            "signal": signal,
-            "position_size": round(float(position_size), 6),
-            "notional_value": round(float(position_size * price), 2),
-            "risk_budget": round(float(risk_budget), 2),
-            "stop_loss_price": round(float(stop_loss_price), 4),
-        }
+    for idx in range(1, len(data)):
+        current_window = data.iloc[: idx + 1]
+        signal = engine.generate_signal(current_window, account_balance=cash)
+        current_price = float(data.iloc[idx]["close"])
+
+        if signal["signal"] == "BUY" and position == 0:
+            position = (cash * 0.5) / current_price
+            cash *= 0.5
+        elif signal["signal"] == "SELL" and position > 0:
+            cash += position * current_price
+            position = 0.0
+
+        current_value = cash + (position * current_price)
+        equity_curve.append(float(current_value))
+
+    final_value = equity_curve[-1]
+    total_return = ((final_value - initial_capital) / initial_capital) * 100
+    return {
+        "symbol": symbol,
+        "initial_capital": initial_capital,
+        "final_value": final_value,
+        "total_return": round(float(total_return), 4),
+        "equity_curve": [round(float(v), 2) for v in equity_curve],
+    }

@@ -1,4 +1,10 @@
-DATABASE_URL=sqlite:///./trading.db
-BINANCE_API_KEY=
-BINANCE_API_SECRET=
-ALPHA_VANTAGE_API_KEY=
+fastapi==0.115.2
+uvicorn==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.4.0
+sqlalchemy==2.0.35
+httpx==0.27.2
+pandas==2.2.3
+numpy==2.1.4
+scikit-learn==1.5.2
+python-dotenv==1.0.1

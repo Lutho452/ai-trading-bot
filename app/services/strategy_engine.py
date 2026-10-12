@@ -1,41 +1,117 @@
 from __future__ import annotations
 
+from typing import Any, Dict
+
 import numpy as np
 import pandas as pd
+from sklearn.linear_model import LogisticRegression
+
+from app.services.feature_engineering import add_technical_features
 
 
-def safe_rolling_mean(series: pd.Series, window: int) -> pd.Series:
-    return series.rolling(window=window, min_periods=1).mean()
+class StrategyEngine:
+    def __init__(self, lookahead: int = 3):
+        self.lookahead = lookahead
+        self.model = LogisticRegression(max_iter=2000, solver="lbfgs")
 
+    def prepare_features(self, data: pd.DataFrame) -> pd.DataFrame:
+        enriched = add_technical_features(data)
+        if len(enriched) < 5:
+            return enriched
 
-def calculate_rsi(series: pd.Series, window: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=window, min_periods=window).mean()
-    avg_loss = loss.rolling(window=window, min_periods=window).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    return rsi.fillna(50)
+        enriched["future_return"] = enriched["close"].shift(-self.lookahead).pct_change().fillna(0)
+        enriched["target"] = (enriched["future_return"] > 0).astype(int)
+        return enriched
 
+    def train(self, data: pd.DataFrame) -> Dict[str, Any]:
+        enriched = self.prepare_features(data)
+        feature_columns = [
+            "returns",
+            "sma_10",
+            "sma_30",
+            "macd",
+            "rsi_14",
+            "volatility",
+            "bollinger_position",
+        ]
+        model_data = enriched[feature_columns + ["target"]].dropna()
+        if len(model_data) < 10:
+            return {"status": "insufficient_data"}
 
-def add_technical_features(frame: pd.DataFrame) -> pd.DataFrame:
-    data = frame.copy()
-    if data.empty:
-        return data
+        X = model_data[feature_columns]
+        y = model_data["target"]
+        self.model.fit(X, y)
+        return {"status": "trained", "feature_columns": feature_columns}
 
-    data["returns"] = data["close"].pct_change().fillna(0)
-    data["sma_10"] = safe_rolling_mean(data["close"], 10)
-    data["sma_30"] = safe_rolling_mean(data["close"], 30)
-    data["ema_12"] = data["close"].ewm(span=12, adjust=False).mean()
-    data["ema_26"] = data["close"].ewm(span=26, adjust=False).mean()
-    data["macd"] = data["ema_12"] - data["ema_26"]
-    data["rsi_14"] = calculate_rsi(data["close"], 14)
-    data["volatility"] = data["close"].pct_change().rolling(window=10, min_periods=1).std().fillna(0)
-    rolling_mean = data["close"].rolling(window=20, min_periods=1).mean()
-    rolling_std = data["close"].rolling(window=20, min_periods=1).std().fillna(0)
-    data["bollinger_upper"] = rolling_mean + (rolling_std * 2)
-    data["bollinger_lower"] = rolling_mean - (rolling_std * 2)
-    data["bollinger_position"] = (data["close"] - data["bollinger_lower"]) / (data["bollinger_upper"] - data["bollinger_lower"]).replace(0, np.nan)
-    data["bollinger_position"] = data["bollinger_position"].fillna(0.5)
-    return data
+    def generate_signal(self, data: pd.DataFrame, account_balance: float = 10000.0) -> Dict[str, Any]:
+        enriched = self.prepare_features(data)
+        feature_columns = [
+            "returns",
+            "sma_10",
+            "sma_30",
+            "macd",
+            "rsi_14",
+            "volatility",
+            "bollinger_position",
+        ]
+
+        if enriched.empty:
+            return {"signal": "HOLD", "confidence": 0.0, "score": 0.0, "reasons": ["No data"]}
+
+        latest = enriched.iloc[-1]
+        sample = enriched[feature_columns].dropna().tail(1)
+        heuristic_score = 0.0
+        reasons = []
+
+        if latest["sma_10"] > latest["sma_30"]:
+            heuristic_score += 1.2
+            reasons.append("Trend is upward")
+        else:
+            heuristic_score -= 1.2
+            reasons.append("Trend is downward")
+
+        if latest["rsi_14"] < 30:
+            heuristic_score += 1.0
+            reasons.append("Oversold RSI")
+        elif latest["rsi_14"] > 70:
+            heuristic_score -= 1.0
+            reasons.append("Overbought RSI")
+
+        if latest["macd"] > 0:
+            heuristic_score += 0.6
+            reasons.append("Positive MACD")
+        elif latest["macd"] < 0:
+            heuristic_score -= 0.6
+            reasons.append("Negative MACD")
+
+        if latest["volatility"] > 0.02:
+            heuristic_score -= 0.5
+            reasons.append("High volatility")
+
+        if len(sample) == 0:
+            model_score = 0.0
+        else:
+            try:
+                probabilities = self.model.predict_proba(sample)[0]
+                model_score = float(probabilities[1] - probabilities[0])
+            except Exception:
+                model_score = 0.0
+
+        overall_score = heuristic_score * 0.6 + model_score * 1.2
+
+        if overall_score > 0.35:
+            signal = "BUY"
+        elif overall_score < -0.35:
+            signal = "SELL"
+        else:
+            signal = "HOLD"
+
+        confidence = min(max(abs(overall_score) / 2.0, 0.1), 0.95)
+        return {
+            "signal": signal,
+            "confidence": round(float(confidence), 4),
+            "score": round(float(overall_score), 4),
+            "price": float(latest["close"]),
+            "reasons": reasons,
+            "account_balance": float(account_balance),
+        }
